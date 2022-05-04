@@ -1,0 +1,17 @@
+<html>
+	<head>
+		<title>Login</title>
+	</head>
+	<body>
+		<div>
+			<h3>Login</h3>
+			<form method="POST" action="approve">
+				<input type="text" name="username" />
+				<br/>
+				<input type="password" name="password" />
+				<input type="hidden" th:attr="name='reqid'" th:value="${reqid}">
+				<button type="submit">Login</button>
+			</form>
+		</div>
+	</body>
+</html>
