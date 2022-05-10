@@ -10,4 +10,5 @@ public class LoginRequest {
 	private String password;
 	private String reqid;
 	private String state;
+	private String responseType;
 }

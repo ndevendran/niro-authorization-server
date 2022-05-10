@@ -131,15 +131,13 @@ public class UserController {
 			) {
 		String username = req.getUsername();
 		String password = req.getPassword();
-		String state = req.getState();
-		String uriWithParams;
+		String uriWithParams = "";
 		User user = userRepo.findByUsername(username);
 		String requestKey = req.getReqid();
 		Optional<AuthorizationRequest> sessionRequest = authRepo.findById(Long.parseLong(requestKey));
 		AuthorizationRequest authRequest = sessionRequest.get();
 		if(authRequest == null) {
 			model.addAttribute("error", "Invalid session");
-			System.out.println("Returning error...");
 			return "error";
 		}
 		
@@ -147,12 +145,44 @@ public class UserController {
 		String redirectUri = authRequest.getRedirectUri();
 		
 		if(user.getPassword().equals(password)) {
-			String code = authRepo.save(authRequest).getId().toString();
-			uriWithParams = UriComponentsBuilder
-					.fromUriString(redirectUri)
-					.query("code="+code)
-					.query("state="+state).build()
-					.encode().toUriString();
+			if(req.getResponseType() != null) {
+				if(req.getResponseType().equals("code")) {
+					String code = authRepo.save(authRequest).getId().toString();
+					String state = req.getState();
+					uriWithParams = UriComponentsBuilder
+							.fromUriString(redirectUri)
+							.query("code="+code)
+							.query("state="+state).build()
+							.encode().toUriString();
+				}
+				else if(req.getResponseType().equals("token")) {
+					String accessToken = this.generateRandomString(18);
+					AccessToken token = new AccessToken();
+					token.setAccessToken(accessToken);
+					token.setCreatedAt(new Date());
+					tokenRepo.save(token);
+					UriComponentsBuilder uriComponent = UriComponentsBuilder
+							.fromUriString(redirectUri)
+							.query("token="+accessToken);
+					String state = req.getState();
+					if(state != null) {
+						uriComponent.query("state="+state);
+					}
+					
+					uriWithParams = uriComponent.build().encode().toUriString();
+				}
+				else {
+					uriWithParams = UriComponentsBuilder
+							.fromUriString(redirectUri)
+							.query("error=invalid_response_type")
+							.build().encode().toUriString();
+				}
+			} else {
+				uriWithParams = UriComponentsBuilder
+						.fromUriString(redirectUri)
+						.query("error=invalid_response_type")
+						.build().encode().toUriString();
+			}
 		} else {
 			uriWithParams = UriComponentsBuilder
 					.fromUriString(redirectUri)
@@ -209,7 +239,6 @@ public class UserController {
 		
 		//valid client. start processing token request for real
 		if (request.getGrantType() != null && request.getGrantType().equals("authorization_code")) {
-			//HashMap<String, String> code = this.codes.get(json.get("code"));
 			Optional<AuthorizationRequest> codeRequest = authRepo.findById(Long.parseLong(request.getCode()));
 			
 			AuthorizationRequest code = codeRequest.get();
