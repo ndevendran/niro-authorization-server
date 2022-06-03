@@ -1,5 +1,7 @@
 package authserver;
 
+import java.util.List;
+
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
@@ -11,4 +13,5 @@ public class LoginRequest {
 	private String reqid;
 	private String state;
 	private String responseType;
+	private List<String> scopes;
 }

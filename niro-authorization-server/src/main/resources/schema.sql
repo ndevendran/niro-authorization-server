@@ -9,7 +9,8 @@ create table if not exists APP_USER (
 create table if not exists AccessToken (
 	id identity,
 	accessToken varchar(50) not null,
-	createdAt timestamp not null
+	createdAt timestamp not null,
+	scope varchar(50)
 );
 
 create table if not exists AuthorizationRequest (
@@ -17,5 +18,6 @@ create table if not exists AuthorizationRequest (
 	createdAt timestamp not null,
 	clientId varchar(50) not null,
 	clientSecret varchar(50) not null,
-	redirectUri varchar(50) not null
+	redirectUri varchar(50) not null,
+	scope varchar(50)
 );

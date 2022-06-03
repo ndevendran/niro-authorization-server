@@ -1,6 +1,7 @@
 package authserver;
 
 import java.util.Date;
+import java.util.List;
 
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AccessToken {
 	private String accessToken;
+	private String scope;
 	
 	@Id
 	@GeneratedValue(strategy=GenerationType.AUTO)

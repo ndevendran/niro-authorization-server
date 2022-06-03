@@ -10,6 +10,11 @@
 				<br/>
 				<input type="password" name="password" />
 				<input type="hidden" th:attr="name='reqid'" th:value="${reqid}">
+				<div th:each="scope : ${rscope}">
+					<input name="scopes" type="checkbox" th:value="${scope}" th:checked="true" />
+					<span th:text="${scope}">SCOPE</span>
+					<br/>
+				</div>
 				<button type="submit">Login</button>
 			</form>
 		</div>

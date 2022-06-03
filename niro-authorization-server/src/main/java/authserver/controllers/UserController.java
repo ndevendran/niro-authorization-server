@@ -2,6 +2,7 @@ package authserver.controllers;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
@@ -19,15 +20,18 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import authserver.AccessToken;
 import authserver.AuthorizationRequest;
 import authserver.LoginRequest;
+import authserver.RefreshToken;
 import authserver.User;
 import authserver.data.AccessTokenRepo;
 import authserver.data.AuthorizationRequestRepository;
+import authserver.data.RefreshTokenRepo;
 import authserver.data.UserRepository;
 
 @Controller
@@ -40,14 +44,17 @@ public class UserController {
 	@Autowired
 	private UserRepository userRepo;
 	private AccessTokenRepo tokenRepo;
+	private RefreshTokenRepo refreshRepo;
 	private AuthorizationRequestRepository authRepo;
 	
 	private ArrayList<HashMap<String, String>> clients;
 	public UserController(UserRepository userRepo, 
-			AccessTokenRepo tokenRepo, AuthorizationRequestRepository authRepo) {
+			AccessTokenRepo tokenRepo, AuthorizationRequestRepository authRepo,
+			RefreshTokenRepo refreshRepo) {
 		this.userRepo = userRepo;
 		this.tokenRepo = tokenRepo;
 		this.authRepo = authRepo;
+		this.refreshRepo = refreshRepo;
 		this.clients = new ArrayList<>();
 		new HashMap<>();
 		addClient("oauth-client-1", "oauth-secret-1", "localhost/callback");
@@ -58,6 +65,7 @@ public class UserController {
 		newClient.put("clientId", clientId);
 		newClient.put("clientSecret", clientSecret);
 		newClient.put("redirectUri", redirectUri);
+		newClient.put("scope", "read update");
 		if(this.clients == null) {
 			this.clients = new ArrayList<>();
 		}
@@ -104,21 +112,42 @@ public class UserController {
 	
 	@GetMapping("/authorize")
 	public String requestAuthorization(
-				@RequestBody AuthorizationRequest req,
+				@RequestParam String clientId,
+				@RequestParam String redirectUri,
+				@RequestParam(required = false) String scope,
 				Model model
 			) {
 		//HashMap<String, String> client = this.clients.get(0);
-		HashMap<String, String> client = searchClientsByClientId(req.getClientId(), this.clients);
+		HashMap<String, String> client = searchClientsByClientId(clientId, this.clients);
 		if(client == null) {
 			model.addAttribute("error", "Invalid client info");
 			return "error";
-		} else if (!client.get("redirectUri").equals(req.getRedirectUri())){
-			System.out.println(req.getRedirectUri());
-			System.out.println(client.get("redirectUri"));
+		} else if (!client.get("redirectUri").equals(redirectUri)){
 			model.addAttribute("error", "Invalid client info");
 			return "error";
 		}
 		
+		AuthorizationRequest req = new AuthorizationRequest();
+		req.setClientId(clientId);
+		req.setRedirectUri(redirectUri);
+		
+		if(scope != null) {
+			String[] rscope = scope.split(" ");
+			List<String> cscope = Arrays.asList(client.get("scope").split(" "));
+			for(int i = 0; i < rscope.length; i++) {
+				if(!cscope.contains(rscope[i])) {
+					model.addAttribute("error", "Invalid scope");
+					return "error";
+				}
+			}
+			model.addAttribute("rscope", rscope);
+			req.setScope(String.join(" ", rscope));
+		} else {
+			req.setScope(null);
+		}
+
+
+
 		String requestKey = this.authRepo.save(req).getId().toString();
 		model.addAttribute("reqid", requestKey);
 		
@@ -131,9 +160,11 @@ public class UserController {
 			) {
 		String username = req.getUsername();
 		String password = req.getPassword();
-		String uriWithParams = "";
+		List<String> authScopes = req.getScopes();
+		String uriWithParams;
 		User user = userRepo.findByUsername(username);
 		String requestKey = req.getReqid();
+		
 		Optional<AuthorizationRequest> sessionRequest = authRepo.findById(Long.parseLong(requestKey));
 		AuthorizationRequest authRequest = sessionRequest.get();
 		if(authRequest == null) {
@@ -143,10 +174,28 @@ public class UserController {
 		
 		authRepo.deleteById(Long.parseLong(requestKey));
 		String redirectUri = authRequest.getRedirectUri();
+		String rscopeArray = authRequest.getScope();
+		List<String> rscopes = (rscopeArray != null) ? Arrays.asList(rscopeArray.split(" ")) : null;
+		boolean validScopes = true;
 		
-		if(user.getPassword().equals(password)) {
+		if(authScopes != null && rscopes != null) {
+			for(int i = 0; i<authScopes.size(); i++) {
+				if(!rscopes.contains(authScopes.get(i))) {
+					validScopes = false;
+					break;
+				}
+			}
+		} else if(authScopes != null && rscopes == null) {
+			validScopes = false;
+		}
+		
+		if(user.getPassword().equals(password) && validScopes) {
 			if(req.getResponseType() != null) {
 				if(req.getResponseType().equals("code")) {
+					if(authScopes != null) {
+						authRequest.setScope(String.join(" ", authScopes));
+					}
+					
 					String code = authRepo.save(authRequest).getId().toString();
 					String state = req.getState();
 					uriWithParams = UriComponentsBuilder
@@ -160,6 +209,10 @@ public class UserController {
 					AccessToken token = new AccessToken();
 					token.setAccessToken(accessToken);
 					token.setCreatedAt(new Date());
+					if(authScopes != null) {
+						token.setScope(String.join(" ", authScopes));
+					}
+					
 					tokenRepo.save(token);
 					UriComponentsBuilder uriComponent = UriComponentsBuilder
 							.fromUriString(redirectUri)
@@ -238,30 +291,90 @@ public class UserController {
 		}
 		
 		//valid client. start processing token request for real
-		if (request.getGrantType() != null && request.getGrantType().equals("authorization_code")) {
-			Optional<AuthorizationRequest> codeRequest = authRepo.findById(Long.parseLong(request.getCode()));
-			
-			AuthorizationRequest code = codeRequest.get();
-			if (code != null) {
-				authRepo.deleteById(code.getId());
-				if (code.getClientId().equals(clientId)) {
-					String access_token = this.generateRandomString(18);
-					AccessToken token = new AccessToken();
-					token.setAccessToken(access_token);
-					token.setCreatedAt(new Date());
-					//store this access token in a SQL database
-					tokenRepo.save(token);
-					response.put("token", access_token);
-					response.put("tokenId", token.getId().toString());
-					response.put("token_type", "Bearer");
+		if (request.getGrantType() != null) {
+			if (request.getGrantType().equals("authorization_code")) {
+				Optional<AuthorizationRequest> codeRequest = authRepo.findById(Long.parseLong(request.getCode()));
+				
+				AuthorizationRequest code = codeRequest.get();
+				if (code != null) {
+					authRepo.deleteById(code.getId());
+					if (code.getClientId().equals(clientId)) {
+						String access_token = this.generateRandomString(18);
+						String refresh_token = this.generateRandomString(18);
+						
+						AccessToken token = new AccessToken();
+						RefreshToken refreshToken = new RefreshToken();
+
+						token.setAccessToken(access_token);
+						token.setCreatedAt(new Date());
+						token.setScope(code.getScope());
+						tokenRepo.save(token);
+						
+						refreshToken.setRefreshToken(refresh_token);
+						refreshToken.setClientId(clientId);
+						refreshToken.setCreatedAt(new Date());
+						refreshRepo.save(refreshToken);
+						
+						response.put("token", access_token);
+						response.put("refreshToken", refreshToken.getId().toString());
+						response.put("tokenId", token.getId().toString());
+						response.put("token_type", "Bearer");
+					} else {
+						//return 400 error code "invalid_grant"
+						response.put("error", "client_mismatch");
+						return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+					}
 				} else {
-					//return 400 error code "invalid_grant"
-					response.put("error", "client_mismatch");
+					//return 400 error "invalid_grant"
+					response.put("error", "invalid_grant");
+					return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+				}
+			} else if(request.getGrantType().equals("client_credentials")) {
+				String access_token = this.generateRandomString(18);
+				String refresh_token = this.generateRandomString(18);
+				
+				AccessToken token = new AccessToken();
+				RefreshToken refreshToken = new RefreshToken();
+				
+				token.setAccessToken(access_token);
+				token.setCreatedAt(new Date());
+				tokenRepo.save(token);
+				
+				refreshToken.setClientId(clientId);
+				refreshToken.setCreatedAt(new Date());
+				refreshToken.setRefreshToken(refresh_token);
+				refreshRepo.save(refreshToken);
+				
+				response.put("token", access_token);
+				response.put("tokenId", token.getId().toString());
+				response.put("token_type", "Bearer");
+				response.put("refresh_token", refreshToken.getId().toString());
+			} else if(request.getGrantType().equals("refresh_token")) {
+				String refreshTokenKey = request.getRefreshToken();
+				RefreshToken refreshToken = refreshRepo.findById(refreshTokenKey);
+				if(refreshToken != null) {
+					if(refreshToken.getClientId().equals(clientId)) {
+						String access_token = this.generateRandomString(18);
+						AccessToken token = new AccessToken();
+						token.setAccessToken(access_token);
+						token.setCreatedAt(new Date());
+						tokenRepo.save(token);
+						response.put("token", access_token);
+						response.put("tokenId", token.getId().toString());
+						response.put("token_type", "Bearer");
+						response.put("refresh_token", refreshToken.getId().toString());
+					} else {
+						refreshRepo.delete(refreshToken);
+						response.put("error", "invalid_grant");
+						return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+					}
+				} else {
+					response.put("error", "invalid_grant");
 					return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
 				}
 			} else {
-				//return 400 error "invalid_grant"
-				response.put("error", "invalid_grant");
+				//return 400 error "unsupported_grant_type"
+				response.put("error", "unsupported_grant_type");
 				return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
 			}
 		} else {

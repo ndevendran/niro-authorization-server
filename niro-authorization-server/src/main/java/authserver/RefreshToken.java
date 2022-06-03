@@ -1,7 +1,6 @@
 package authserver;
 
 import java.util.Date;
-import java.util.List;
 
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
@@ -13,22 +12,17 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
 @Data
-@RequiredArgsConstructor
 @Entity
-public class AuthorizationRequest {
-	private String clientId;
-	private String clientSecret;
-	private String redirectUri;
-	private String grantType;
-	private String code;
+@RequiredArgsConstructor
+public class RefreshToken {
 	private String refreshToken;
-	private String scope;
+	private String clientId;
 	
 	@Id
 	@GeneratedValue(strategy=GenerationType.AUTO)
 	private Long id;
 	private Date createdAt;
-
+	
 	@PrePersist
 	void createdAt() {
 		this.createdAt = new Date();
